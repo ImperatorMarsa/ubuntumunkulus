@@ -9,6 +9,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder:v1
     env:
       SOURCE_ISO_URL: ${{ secrets.SOURCE_ISO_URL }}
       SOURCE_ISO_SHA256: ${{ secrets.SOURCE_ISO_SHA256 }}
@@ -29,23 +31,6 @@ jobs:
               exit 1
             fi
           done
-
-      - name: Install build dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "$(id -u)" -eq 0 ]; then
-            apt-get update
-            apt-get install --yes curl xorriso
-          else
-            sudo apt-get update
-            sudo apt-get install --yes curl xorriso
-          fi
-          mkdir -p "$RUNNER_TEMP/bin"
-          curl --fail --location --retry 3 --output "$RUNNER_TEMP/bin/yq" \
-            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
-          chmod 0755 "$RUNNER_TEMP/bin/yq"
-          printf '%s\n' "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
       - name: Download and build ISO
         shell: bash
