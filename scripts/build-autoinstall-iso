@@ -129,7 +129,7 @@ xorriso \
   -outdev "$output" \
   -boot_image any replay \
   -overwrite on \
-  -mkdir /autoinstall \
+  -mkdir /autoinstall -- \
   -map "$work_dir/grub.cfg" /boot/grub/grub.cfg \
   -map "$work_dir/autoinstall/user-data" /autoinstall/user-data \
   -map "$work_dir/autoinstall/meta-data" /autoinstall/meta-data \
