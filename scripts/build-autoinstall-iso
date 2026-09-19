@@ -118,7 +118,7 @@ if ! grep -q '^[[:space:]]*linux' "$work_dir/grub.cfg"; then
   printf 'Source ISO GRUB configuration has no Linux boot entry.\n' >&2
   exit 1
 fi
-sed -i "s| ---| $kernel_arguments ---|" "$work_dir/grub.cfg"
+sed -i 's| ---| autoinstall ds=nocloud\\;s=/cdrom/autoinstall/ ---|' "$work_dir/grub.cfg"
 if ! grep -q 'autoinstall ds=nocloud\\;s=/cdrom/autoinstall/' "$work_dir/grub.cfg"; then
   printf 'Failed to add autoinstall kernel arguments to GRUB configuration.\n' >&2
   exit 1
