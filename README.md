@@ -239,9 +239,15 @@ Ansible
 * it locks the local password after installation and grants that user passwordless `sudo` access;
 * it powers the machine off after a successful installation.
 
-The SSH public key is supplied at build time and is never stored in this repository. Build dependencies are `bash`, `openssl`, `sha256sum`, `xorriso`, and [mikefarah/yq](https://github.com/mikefarah/yq) v4.
+The SSH public key is supplied at build time and is never stored in this repository. Build dependencies are `bash`, `openssl`, `sha256sum`, `xorriso`, and [mikefarah/yq](https://github.com/mikefarah/yq) v4; they are provided by the ISO builder container image.
 
-Build the image through the `Build autoinstall ISO` GitHub Actions workflow. It is started manually and downloads the official ISO and its `SHA256SUMS` file itself, so the local machine does not need the build dependencies.
+### ISO builder container image
+
+`docker/iso-builder/Dockerfile` defines the shared build environment. Run `Publish ISO builder image` once before the first ISO build. It publishes `ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder` with a mutable `v1` tag and an immutable `sha-<commit>` tag.
+
+Make the package public in its GitHub Packages settings so `act` can pull it without credentials. The ISO workflow currently uses `v1`; after publishing, copy the image digest from the publish workflow summary and replace the tag with `@sha256:<digest>` in a separate commit to pin the environment exactly.
+
+Build the image through the `Build autoinstall ISO` GitHub Actions workflow. It is started manually and downloads the official ISO and its `SHA256SUMS` file itself. No build dependencies are installed during ISO creation.
 
 Configure these repository secrets before running it:
 
@@ -260,13 +266,15 @@ The generated ISO embeds the supplied public key. Treat it as machine-specific o
 Install [nektos/act](https://github.com/nektos/act) and a Docker-compatible container runtime. Copy `act.secrets.example` to `act.secrets`, replace every value with the values for the target machine, then run:
 
 ```bash
+docker pull ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder:v1
+
 act workflow_dispatch \
   --workflows .github/workflows/build-autoinstall-iso.yml \
   --secret-file act.secrets \
   --artifact-server-path "$PWD/build/artifacts"
 ```
 
-`act.secrets` is ignored by Git. The resulting artifact is written under `build/artifacts`; do not add it or the secrets file to the repository.
+`act.secrets` is ignored by Git. Docker caches the pulled builder image, so subsequent local ISO builds do not reinstall dependencies. The resulting artifact is written under `build/artifacts`; do not add it or the secrets file to the repository.
 
 ### QEMU smoke test
 
