@@ -241,25 +241,36 @@ Ansible
 
 The SSH public key is supplied at build time and is never stored in this repository. Build dependencies are `bash`, `openssl`, `sha256sum`, `xorriso`, and [mikefarah/yq](https://github.com/mikefarah/yq) v4.
 
-Download the official `ubuntu-26.04-live-server-amd64.iso` and its `SHA256SUMS` file from [releases.ubuntu.com/26.04](https://releases.ubuntu.com/26.04/). Obtain the expected checksum from `SHA256SUMS`, not from the downloaded ISO itself, then build the image:
+Build the image through the `Build autoinstall ISO` GitHub Actions workflow. It is started manually and downloads the official ISO and its `SHA256SUMS` file itself, so the local machine does not need the build dependencies.
+
+Configure these repository secrets before running it:
+
+| Secret | Value |
+| --- | --- |
+| `SOURCE_ISO_URL` | Direct URL of the official amd64 Ubuntu Server ISO. |
+| `SOURCE_ISO_SHA256` | URL of the corresponding official `SHA256SUMS` file. The workflow finds the checksum for the ISO filename automatically. |
+| `SSH_PUBLIC_KEY` | Public key that will be authorized for the initial user. |
+| `HOSTNAME` | Hostname for the installed machine. |
+| `USERNAME` | Name of the initial user. |
+
+The generated ISO embeds the supplied public key. Treat it as machine-specific output; the workflow publishes it as `ubuntu-autoinstall-amd64`, and `build/` is intentionally not tracked. The original ISO remains unchanged.
+
+### Local build with act
+
+Install [nektos/act](https://github.com/nektos/act) and a Docker-compatible container runtime. Copy `act.secrets.example` to `act.secrets`, replace every value with the values for the target machine, then run:
 
 ```bash
-source_iso=ubuntu-26.04-live-server-amd64.iso
-expected_sha256="$(awk '$2 == "*ubuntu-26.04-live-server-amd64.iso" { print $1 }' SHA256SUMS)"
-./scripts/build-autoinstall-iso \
-  --source-iso "$source_iso" \
-  --sha256 "$expected_sha256" \
-  --ssh-key ~/.ssh/id_ed25519.pub \
-  --hostname my-host \
-  --username ubuntu \
-  --output build/ubuntu-26.04-autoinstall-amd64.iso
+act workflow_dispatch \
+  --workflows .github/workflows/build-autoinstall-iso.yml \
+  --secret-file act.secrets \
+  --artifact-server-path "$PWD/build/artifacts"
 ```
 
-The generated ISO embeds the supplied public key. Treat it as machine-specific output; `build/` is intentionally not tracked. The original ISO remains unchanged.
+`act.secrets` is ignored by Git. The resulting artifact is written under `build/artifacts`; do not add it or the secrets file to the repository.
 
 ### QEMU smoke test
 
-Use an empty disposable virtual disk. The installer must stop before making changes if a second non-removable disk is attached.
+Download and extract the artifact to `build/ubuntu-autoinstall-amd64.iso`, then use an empty disposable virtual disk. The installer must stop before making changes if a second non-removable disk is attached.
 
 ```bash
 qemu-img create -f qcow2 /tmp/ubuntu-autoinstall-test.qcow2 32G
@@ -267,7 +278,7 @@ qemu-system-x86_64 \
   -m 4G \
   -smp 2 \
   -drive file=/tmp/ubuntu-autoinstall-test.qcow2,format=qcow2 \
-  -cdrom build/ubuntu-26.04-autoinstall-amd64.iso \
+  -cdrom build/ubuntu-autoinstall-amd64.iso \
   -boot d
 ```
 
