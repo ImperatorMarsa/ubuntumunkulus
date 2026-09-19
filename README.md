@@ -241,6 +241,8 @@ Ansible
 
 The SSH public key is supplied at build time and is never stored in this repository. Build dependencies are `bash`, `openssl`, `sha256sum`, `xorriso`, and [mikefarah/yq](https://github.com/mikefarah/yq) v4; they are provided by the ISO builder container image.
 
+The builder keeps the source ISO boot layout by loading it with `xorriso` and replaying its boot image configuration. It changes only `/boot/grub/grub.cfg` and the two `/autoinstall/` NoCloud files, so the source ISO's BIOS, UEFI, MBR, GPT, and El Torito settings are retained without assuming fixed internal boot file paths.
+
 ### ISO builder container image
 
 `docker/iso-builder/Dockerfile` defines the shared build environment. Run `Publish ISO builder image` once before the first ISO build. It publishes `ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder` with a mutable `v1` tag and an immutable `sha-<commit>` tag.
@@ -276,6 +278,13 @@ act workflow_dispatch \
 
 `act.secrets` is ignored by Git. Docker caches the pulled builder image, so subsequent local ISO builds do not reinstall dependencies. The resulting artifact is written under `build/artifacts`; do not add it or the secrets file to the repository.
 
+Inspect the resulting boot metadata when diagnosing boot failures:
+
+```bash
+xorriso -indev build/ubuntu-autoinstall-amd64.iso -report_el_torito plain
+xorriso -indev build/ubuntu-autoinstall-amd64.iso -report_system_area plain
+```
+
 ### QEMU smoke test
 
 Download and extract the artifact to `build/ubuntu-autoinstall-amd64.iso`, then use an empty disposable virtual disk. The installer must stop before making changes if a second non-removable disk is attached.
@@ -291,6 +300,22 @@ qemu-system-x86_64 \
 ```
 
 After the VM powers off, remove `-cdrom` and boot the same virtual disk. Verify SSH key login and `sudo -n true`; password authentication must be rejected.
+
+Also boot the ISO in UEFI mode. On Ubuntu, install the `ovmf` package and adjust `OVMF_CODE` if the firmware is installed elsewhere:
+
+```bash
+OVMF_CODE=/usr/share/OVMF/OVMF_CODE.fd
+test -r "$OVMF_CODE"
+
+qemu-img create -f qcow2 /tmp/ubuntu-autoinstall-uefi-test.qcow2 32G
+qemu-system-x86_64 \
+  -m 4G \
+  -smp 2 \
+  -bios "$OVMF_CODE" \
+  -drive file=/tmp/ubuntu-autoinstall-uefi-test.qcow2,format=qcow2 \
+  -cdrom build/ubuntu-autoinstall-amd64.iso \
+  -boot d
+```
 
 ## Принципы
 
