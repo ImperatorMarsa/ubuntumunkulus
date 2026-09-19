@@ -91,18 +91,17 @@ mkdir -p "$(dirname "$output")"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 
-xorriso -osirrox on -indev "$source_iso" -extract / "$work_dir/iso" >/dev/null
+# Keep the source boot records intact; only GRUB and NoCloud data are changed.
+xorriso -osirrox on -indev "$source_iso" \
+  -extract /boot/grub/grub.cfg "$work_dir/grub.cfg" >/dev/null
+if [ ! -f "$work_dir/grub.cfg" ]; then
+  printf 'Source ISO has no readable boot/grub/grub.cfg.\n' >&2
+  exit 1
+fi
 
-for path in boot/grub/grub.cfg boot/grub/i386-pc/boot_hybrid.img boot/grub/i386-pc/eltorito.img boot/grub/efi.img; do
-  if [ ! -f "$work_dir/iso/$path" ]; then
-    printf 'Source ISO has an unsupported boot layout; missing %s.\n' "$path" >&2
-    exit 1
-  fi
-done
-
-mkdir -p "$work_dir/iso/autoinstall"
-cp "$template_dir/user-data" "$work_dir/iso/autoinstall/user-data"
-cp "$template_dir/meta-data" "$work_dir/iso/autoinstall/meta-data"
+mkdir -p "$work_dir/autoinstall"
+cp "$template_dir/user-data" "$work_dir/autoinstall/user-data"
+cp "$template_dir/meta-data" "$work_dir/autoinstall/meta-data"
 
 password_hash="$(openssl rand -base64 48 | openssl passwd -6 -stdin)"
 HOSTNAME="$hostname" USERNAME="$username" PASSWORD_HASH="$password_hash" SSH_AUTHORIZED_KEY="$ssh_key" \
@@ -112,29 +111,38 @@ HOSTNAME="$hostname" USERNAME="$username" PASSWORD_HASH="$password_hash" SSH_AUT
          .autoinstall.ssh.authorized-keys = [strenv(SSH_AUTHORIZED_KEY)] |
          .autoinstall.late-commands[0] = "curtin in-target -- /usr/bin/passwd --lock " + strenv(USERNAME) |
          .autoinstall.late-commands[1] = "printf '\''%s\\n'\'' '\''" + strenv(USERNAME) + " ALL=(ALL) NOPASSWD: ALL'\'' | curtin in-target -- /usr/bin/install -m 0440 -o root -g root /dev/stdin /etc/sudoers.d/90-" + strenv(USERNAME) + "-nopasswd"' \
-  "$work_dir/iso/autoinstall/user-data"
+  "$work_dir/autoinstall/user-data"
 
 kernel_arguments='autoinstall ds=nocloud\;s=/cdrom/autoinstall/'
-if ! grep -q '^[[:space:]]*linux' "$work_dir/iso/boot/grub/grub.cfg"; then
+if ! grep -q '^[[:space:]]*linux' "$work_dir/grub.cfg"; then
   printf 'Source ISO GRUB configuration has no Linux boot entry.\n' >&2
   exit 1
 fi
-sed -i "s| ---| $kernel_arguments ---|" "$work_dir/iso/boot/grub/grub.cfg"
-if [ -f "$work_dir/iso/isolinux/txt.cfg" ]; then
-  sed -i "s| ---| $kernel_arguments ---|" "$work_dir/iso/isolinux/txt.cfg"
+sed -i "s| ---| $kernel_arguments ---|" "$work_dir/grub.cfg"
+if ! grep -q 'autoinstall ds=nocloud\\;s=/cdrom/autoinstall/' "$work_dir/grub.cfg"; then
+  printf 'Failed to add autoinstall kernel arguments to GRUB configuration.\n' >&2
+  exit 1
 fi
 
-xorriso -as mkisofs \
-  -r -V 'Ubuntu Server Autoinstall' \
-  -o "$output" \
-  --grub2-mbr "$work_dir/iso/boot/grub/i386-pc/boot_hybrid.img" \
-  -partition_offset 16 --mbr-force-bootable \
-  -append_partition 2 0xef "$work_dir/iso/boot/grub/efi.img" \
-  -appended_part_as_gpt \
-  -c boot.catalog \
-  -b boot/grub/i386-pc/eltorito.img \
-  -no-emul-boot -boot-load-size 4 -boot-info-table --grub2-boot-info \
-  -eltorito-alt-boot -e '--interval:appended_partition_2:all::' -no-emul-boot \
-  "$work_dir/iso"
+xorriso \
+  -indev "$source_iso" \
+  -outdev "$output" \
+  -boot_image any replay \
+  -overwrite on \
+  -mkdir /autoinstall \
+  -map "$work_dir/grub.cfg" /boot/grub/grub.cfg \
+  -map "$work_dir/autoinstall/user-data" /autoinstall/user-data \
+  -map "$work_dir/autoinstall/meta-data" /autoinstall/meta-data \
+  -commit >/dev/null
+
+mkdir "$work_dir/verify"
+for path in boot/grub/grub.cfg autoinstall/user-data autoinstall/meta-data; do
+  xorriso -osirrox on -indev "$output" \
+    -extract "/$path" "$work_dir/verify/$(basename "$path")" >/dev/null
+done
+if ! grep -q 'autoinstall ds=nocloud\\;s=/cdrom/autoinstall/' "$work_dir/verify/grub.cfg"; then
+  printf 'Generated ISO GRUB configuration has no autoinstall kernel arguments.\n' >&2
+  exit 1
+fi
 
 printf 'Created %s\n' "$output"
