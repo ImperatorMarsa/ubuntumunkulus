@@ -1,0 +1,30 @@
+#cloud-config
+autoinstall:
+  version: 1
+  identity:
+    hostname: __HOSTNAME__
+    username: __USERNAME__
+    # Subiquity requires a password hash. The build script supplies a random
+    # hash and locks it after installation, leaving SSH keys as the only login path.
+    password: "__PASSWORD_HASH__"
+  ssh:
+    install-server: true
+    authorized-keys:
+      - "__SSH_AUTHORIZED_KEY__"
+    allow-pw: false
+  early-commands:
+    - |
+      set -eu
+      disk_count="$(lsblk -dn -o TYPE,RM | awk '$1 == "disk" && $2 == "0" { count++ } END { print count + 0 }')"
+      if [ "$disk_count" -ne 1 ]; then
+        printf '%s\n' "Refusing to install: expected exactly one non-removable disk, found $disk_count." >&2
+        exit 1
+      fi
+  storage:
+    layout:
+      name: direct
+      match: {}
+  late-commands:
+    - curtin in-target -- /usr/bin/passwd --lock __USERNAME__
+    - printf '%s\n' '__USERNAME__ ALL=(ALL) NOPASSWD: ALL' | curtin in-target -- /usr/bin/install -m 0440 -o root -g root /dev/stdin /etc/sudoers.d/90-__USERNAME__-nopasswd
+  shutdown: poweroff

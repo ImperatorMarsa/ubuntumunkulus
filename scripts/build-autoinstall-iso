@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: build-autoinstall-iso --source-iso PATH --sha256 HEX --ssh-key PATH --output PATH [--hostname NAME] [--username NAME]
+
+Build a bootable Ubuntu Server autoinstall ISO from an official amd64 ISO.
+The SHA256 value must come from Canonical's SHA256SUMS file for the source ISO.
+EOF
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || {
+    printf 'Required command not found: %s\n' "$1" >&2
+    exit 1
+  }
+}
+
+source_iso=''
+expected_sha256=''
+ssh_key_file=''
+output=''
+hostname='ubuntu'
+username='ubuntu'
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --source-iso) source_iso="$2"; shift 2 ;;
+    --sha256) expected_sha256="$2"; shift 2 ;;
+    --ssh-key) ssh_key_file="$2"; shift 2 ;;
+    --output) output="$2"; shift 2 ;;
+    --hostname) hostname="$2"; shift 2 ;;
+    --username) username="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+for command in openssl sha256sum xorriso yq; do
+  require_command "$command"
+done
+
+if [ -z "$source_iso" ] || [ -z "$expected_sha256" ] || [ -z "$ssh_key_file" ] || [ -z "$output" ]; then
+  usage >&2
+  exit 2
+fi
+
+if [ ! -f "$source_iso" ] || [ ! -r "$source_iso" ]; then
+  printf 'Source ISO is not a readable file: %s\n' "$source_iso" >&2
+  exit 1
+fi
+if [ ! -f "$ssh_key_file" ] || [ ! -r "$ssh_key_file" ]; then
+  printf 'SSH public-key file is not readable: %s\n' "$ssh_key_file" >&2
+  exit 1
+fi
+if ! [[ "$expected_sha256" =~ ^[[:xdigit:]]{64}$ ]]; then
+  printf 'SHA256 must be a 64-character hexadecimal digest.\n' >&2
+  exit 2
+fi
+if ! [[ "$hostname" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+  printf 'Hostname must be 1-63 lowercase letters, digits, or hyphens.\n' >&2
+  exit 2
+fi
+if ! [[ "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+  printf 'Username contains unsupported characters.\n' >&2
+  exit 2
+fi
+
+actual_sha256="$(sha256sum "$source_iso" | cut -d ' ' -f 1)"
+if [ "${actual_sha256,,}" != "${expected_sha256,,}" ]; then
+  printf 'Source ISO SHA256 does not match the expected value.\n' >&2
+  exit 1
+fi
+
+ssh_key="$(tr -d '\r\n' < "$ssh_key_file")"
+if ! [[ "$ssh_key" =~ ^(ssh-|ecdsa-|sk-) ]]; then
+  printf 'SSH public-key file does not start with a supported public-key type.\n' >&2
+  exit 1
+fi
+
+template_dir="$(dirname "$(realpath "$0")")/../autoinstall"
+template_dir="$(realpath "$template_dir")"
+if [ ! -f "$template_dir/user-data" ] || [ ! -f "$template_dir/meta-data" ]; then
+  printf 'Autoinstall template is incomplete: %s\n' "$template_dir" >&2
+  exit 1
+fi
+
+output="$(realpath -m "$output")"
+mkdir -p "$(dirname "$output")"
+work_dir="$(mktemp -d)"
+trap 'rm -rf "$work_dir"' EXIT
+
+xorriso -osirrox on -indev "$source_iso" -extract / "$work_dir/iso" >/dev/null
+
+for path in boot/grub/grub.cfg boot/grub/i386-pc/boot_hybrid.img boot/grub/i386-pc/eltorito.img boot/grub/efi.img; do
+  if [ ! -f "$work_dir/iso/$path" ]; then
+    printf 'Source ISO has an unsupported boot layout; missing %s.\n' "$path" >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$work_dir/iso/autoinstall"
+cp "$template_dir/user-data" "$work_dir/iso/autoinstall/user-data"
+cp "$template_dir/meta-data" "$work_dir/iso/autoinstall/meta-data"
+
+password_hash="$(openssl rand -base64 48 | openssl passwd -6 -stdin)"
+HOSTNAME="$hostname" USERNAME="$username" PASSWORD_HASH="$password_hash" SSH_AUTHORIZED_KEY="$ssh_key" \
+  yq -i '.autoinstall.identity.hostname = strenv(HOSTNAME) |
+         .autoinstall.identity.username = strenv(USERNAME) |
+         .autoinstall.identity.password = strenv(PASSWORD_HASH) |
+         .autoinstall.ssh.authorized-keys = [strenv(SSH_AUTHORIZED_KEY)] |
+         .autoinstall.late-commands[0] = "curtin in-target -- /usr/bin/passwd --lock " + strenv(USERNAME) |
+         .autoinstall.late-commands[1] = "printf '\''%s\\n'\'' '\''" + strenv(USERNAME) + " ALL=(ALL) NOPASSWD: ALL'\'' | curtin in-target -- /usr/bin/install -m 0440 -o root -g root /dev/stdin /etc/sudoers.d/90-" + strenv(USERNAME) + "-nopasswd"' \
+  "$work_dir/iso/autoinstall/user-data"
+
+kernel_arguments='autoinstall ds=nocloud\;s=/cdrom/autoinstall/'
+if ! grep -q '^[[:space:]]*linux' "$work_dir/iso/boot/grub/grub.cfg"; then
+  printf 'Source ISO GRUB configuration has no Linux boot entry.\n' >&2
+  exit 1
+fi
+sed -i "s| ---| $kernel_arguments ---|" "$work_dir/iso/boot/grub/grub.cfg"
+if [ -f "$work_dir/iso/isolinux/txt.cfg" ]; then
+  sed -i "s| ---| $kernel_arguments ---|" "$work_dir/iso/isolinux/txt.cfg"
+fi
+
+xorriso -as mkisofs \
+  -r -V 'Ubuntu Server Autoinstall' \
+  -o "$output" \
+  --grub2-mbr "$work_dir/iso/boot/grub/i386-pc/boot_hybrid.img" \
+  -partition_offset 16 --mbr-force-bootable \
+  -append_partition 2 0xef "$work_dir/iso/boot/grub/efi.img" \
+  -appended_part_as_gpt \
+  -c boot.catalog \
+  -b boot/grub/i386-pc/eltorito.img \
+  -no-emul-boot -boot-load-size 4 -boot-info-table --grub2-boot-info \
+  -eltorito-alt-boot -e '--interval:appended_partition_2:all::' -no-emul-boot \
+  "$work_dir/iso"
+
+printf 'Created %s\n' "$output"
