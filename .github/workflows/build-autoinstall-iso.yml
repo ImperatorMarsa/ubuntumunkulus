@@ -1,0 +1,84 @@
+name: Build autoinstall ISO
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_ISO_URL: ${{ secrets.SOURCE_ISO_URL }}
+      SOURCE_ISO_SHA256: ${{ secrets.SOURCE_ISO_SHA256 }}
+      SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+      HOSTNAME: ${{ secrets.HOSTNAME }}
+      USERNAME: ${{ secrets.USERNAME }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate build secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for secret_name in SOURCE_ISO_URL SOURCE_ISO_SHA256 SSH_PUBLIC_KEY HOSTNAME USERNAME; do
+            if [ -z "${!secret_name}" ]; then
+              printf 'Required secret is not set: %s\n' "$secret_name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            apt-get update
+            apt-get install --yes curl xorriso
+          else
+            sudo apt-get update
+            sudo apt-get install --yes curl xorriso
+          fi
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/bin/yq" \
+            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          chmod 0755 "$RUNNER_TEMP/bin/yq"
+          printf '%s\n' "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Download and build ISO
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f source.iso SHA256SUMS ssh-public-key' EXIT
+          source_iso_name="$(basename "${SOURCE_ISO_URL%%\?*}")"
+          if [ -z "$source_iso_name" ]; then
+            printf 'SOURCE_ISO_URL must include an ISO filename.\n' >&2
+            exit 1
+          fi
+
+          curl --fail --location --retry 3 --output source.iso "$SOURCE_ISO_URL"
+          curl --fail --location --retry 3 --output SHA256SUMS "$SOURCE_ISO_SHA256"
+          expected_sha256="$(awk -v filename="$source_iso_name" '$2 == "*" filename || $2 == filename { print $1; exit }' SHA256SUMS)"
+          if [ -z "$expected_sha256" ]; then
+            printf 'Checksum for %s was not found in SOURCE_ISO_SHA256.\n' "$source_iso_name" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "$SSH_PUBLIC_KEY" > ssh-public-key
+          ./scripts/build-autoinstall-iso \
+            --source-iso source.iso \
+            --sha256 "$expected_sha256" \
+            --ssh-key ssh-public-key \
+            --hostname "$HOSTNAME" \
+            --username "$USERNAME" \
+            --output build/ubuntu-autoinstall-amd64.iso
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-autoinstall-amd64
+          path: build/ubuntu-autoinstall-amd64.iso
+          if-no-files-found: error
