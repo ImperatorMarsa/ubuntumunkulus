@@ -247,7 +247,7 @@ The builder keeps the source ISO boot layout by loading it with `xorriso` and re
 
 `docker/iso-builder/Dockerfile` defines the shared build environment. Run `Publish ISO builder image` once before the first ISO build. It publishes `ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder` with a mutable `v1` tag and an immutable `sha-<commit>` tag.
 
-Make the package public in its GitHub Packages settings so `act` can pull it without credentials. The ISO workflow currently uses `v1`; after publishing, copy the image digest from the publish workflow summary and replace the tag with `@sha256:<digest>` in a separate commit to pin the environment exactly.
+Make the package public in its GitHub Packages settings so `act` can pull it without credentials. The ISO workflow is pinned to an image digest; when publishing a new builder image, copy its digest from the publish workflow summary and update both the workflow and the local pull command in a separate commit.
 
 Build the image through the `Build autoinstall ISO` GitHub Actions workflow. It is started manually and downloads the official ISO and its `SHA256SUMS` file itself. No build dependencies are installed during ISO creation.
 
@@ -268,7 +268,7 @@ The generated ISO embeds the supplied public key. Treat it as machine-specific o
 Install [nektos/act](https://github.com/nektos/act) and a Docker-compatible container runtime. Copy `act.secrets.example` to `act.secrets`, replace every value with the values for the target machine, then run:
 
 ```bash
-docker pull ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder:v1
+docker pull ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder@sha256:a4650404a6828aac0c12e954635c5b73dad8c5a880949489438906b1e3aff01a
 
 act workflow_dispatch \
   --workflows .github/workflows/build-autoinstall-iso.yml \

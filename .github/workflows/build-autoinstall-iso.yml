@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder:v1
+      image: ghcr.io/imperatormarsa/ubuntumunkulus-iso-builder@sha256:a4650404a6828aac0c12e954635c5b73dad8c5a880949489438906b1e3aff01a
     env:
       SOURCE_ISO_URL: ${{ secrets.SOURCE_ISO_URL }}
       SOURCE_ISO_SHA256: ${{ secrets.SOURCE_ISO_SHA256 }}
