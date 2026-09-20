@@ -13,7 +13,7 @@ services:
     ports:
       - 127.0.0.1:8006:8006
     volumes:
-      - ./build/ubuntu-autoinstall-amd64.iso:/boot.iso:ro
+      - ./build/artifacts/1/ubuntu-autoinstall-amd64/ubuntu-autoinstall-amd64.zip:/boot.iso:ro
       - ./build/qemu-test:/storage
     restart: "no"
     stop_grace_period: 2m
