@@ -285,7 +285,46 @@ xorriso -indev build/ubuntu-autoinstall-amd64.iso -report_el_torito plain
 xorriso -indev build/ubuntu-autoinstall-amd64.iso -report_system_area plain
 ```
 
-### QEMU smoke test
+### Docker Compose smoke test
+
+`compose.yaml` запускает собранный ISO в изолированной UEFI VM. Требуются Docker Engine на Linux-хосте `x86_64`, Docker Compose v2.24.4 или новее и доступ к KVM; Docker Desktop не предоставляет KVM контейнеру.
+
+```bash
+test -r /dev/kvm
+docker compose config --quiet
+```
+
+Download and extract the artifact to `build/ubuntu-autoinstall-amd64.iso`, then start the installer:
+
+```bash
+docker compose up
+```
+
+Open `http://127.0.0.1:8006` in a browser. The viewer is unauthenticated and unencrypted, so it is deliberately bound only to the local host. The ISO is mounted read-only and the installer sees only the disposable `build/qemu-test` disk; `/build/` is ignored by Git.
+
+After the installer powers the VM off, remove the stopped installer container without removing its disk and boot the installed system without the ISO:
+
+```bash
+docker compose down
+docker compose -f compose.yaml -f compose.postinstall.yaml up -d
+```
+
+The post-install configuration exposes guest SSH only as `127.0.0.1:2222`. Verify SSH key login and `sudo -n true`; password authentication must be rejected:
+
+```bash
+ssh -p 2222 username@127.0.0.1 'sudo -n true'
+ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no username@127.0.0.1
+```
+
+The second command must fail instead of accepting a password. Stop the VM when the check is complete:
+
+```bash
+docker compose -f compose.yaml -f compose.postinstall.yaml down
+```
+
+To start a new destructive installation test, remove `build/qemu-test/` after stopping the VM. Do not attach host disks, host directories, USB devices, GPUs, or additional guest ports to this test configuration.
+
+### Direct QEMU smoke test
 
 Download and extract the artifact to `build/ubuntu-autoinstall-amd64.iso`, then use an empty disposable virtual disk. The installer must stop before making changes if a second non-removable disk is attached.
 
