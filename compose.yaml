@@ -1,0 +1,19 @@
+services:
+  qemu:
+    image: qemux/qemu:7.50@sha256:e7f6fda52503a546fd649670ba46e4bc23dc6dcef275bc3fac48877fbbc430df
+    container_name: ubuntu-iso-test
+    environment:
+      CPU_CORES: "2"
+      RAM_SIZE: "4G"
+      DISK_SIZE: "32G"
+      DISK_FMT: qcow2
+      NETWORK: user
+    devices:
+      - /dev/kvm
+    ports:
+      - 127.0.0.1:8006:8006
+    volumes:
+      - ./build/ubuntu-autoinstall-amd64.iso:/boot.iso:ro
+      - ./build/qemu-test:/storage
+    restart: "no"
+    stop_grace_period: 2m
