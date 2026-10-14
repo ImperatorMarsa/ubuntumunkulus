@@ -231,6 +231,36 @@ Ansible
 
 ## Unattended installation ISO
 
+### Сторонний ubuntu-autoinstall-generator
+
+В каталоге `tools/ubuntu-autoinstall-generator` подключён исходный проект
+[covertsh/ubuntu-autoinstall-generator](https://github.com/covertsh/ubuntu-autoinstall-generator)
+как Git submodule (зафиксирован на конкретном коммите).
+
+Для получения исходников при клонировании:
+
+```bash
+git clone --recurse-submodules https://github.com/ImperatorMarsa/ubuntumunkulus.git
+```
+
+В существующем клоне:
+
+```bash
+git submodule update --init --recursive
+```
+
+Исходный генератор документирует сборку образов Ubuntu 20.04, а его последний
+коммит датирован 2024 годом. Совместимость с используемой здесь Ubuntu Server
+26.04 **не проверена**. Это **опциональный инструмент для изучения и экспериментов**,
+не часть штатного CI. Не запускайте созданный им unattended-образ на машине
+с важными данными без проверки в виртуальной машине.
+
+Штатный и рекомендуемый способ сборки в этом репозитории остаётся
+`scripts/build-autoinstall-iso`, который используется workflow
+`.github/workflows/build-autoinstall-iso.yml` и сохраняет загрузочную структуру
+оригинального ISO.
+
+
 `autoinstall/user-data` defines a minimal Ubuntu Server 26.04 LTS installation:
 
 * it refuses to start unless exactly one non-removable disk is present;

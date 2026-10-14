@@ -1,0 +1,3 @@
+[submodule "tools/ubuntu-autoinstall-generator"]
+	path = tools/ubuntu-autoinstall-generator
+	url = https://github.com/covertsh/ubuntu-autoinstall-generator.git
